@@ -1,2 +1,3 @@
+from .impl.CopyModelPackage import copy_model_package
 
-__all__ = []
+__all__ = ["copy_model_package"]
