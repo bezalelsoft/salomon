@@ -6,6 +6,8 @@ Solves everlasting issues with Amazon SageMaker:
 2. Freeze SageMaker model, so that model used for SageMaker endpoints is immutable and safe from incidental modifications by data scientists
 3. Single-command operation for model copy (fills gaps present in Terraform, CloudFormation, etc.) 
 
+(currently works with SageMaker Model Package. TODO: add SageMaker Model support.)
+
 ## Installation
 
 ```shell
@@ -38,8 +40,6 @@ from salomon import copy_model_package
 
 copy_model_package(
     source_arn="arn:aws:sagemaker:eu-central-1:1111111111:model-package/source-model-package/1",
-    dst_account_id="22222222222",
-    dst_name="copy-of-model-package",
     dst_group_name="copy-of-model-package",
     dst_s3_path="s3://bucket-in-22222222222/copy-of-model-package",
     dst_ecr="22222222222.dkr.ecr.eu-central-1.amazonaws.com/copy-of-model-package"   

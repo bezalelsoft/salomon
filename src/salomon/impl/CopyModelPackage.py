@@ -1,10 +1,15 @@
 import boto3, os, time
 from pprint import pprint
 import docker
+import tempfile
 from .s3_helper import parse_s3_url
 
 
-def copy_model_package(source_arn: str, dst_account_id: str, dst_name: str, dst_group_name: str, dst_s3_path: str, dst_ecr: str):
+def copy_model_package(
+        source_arn: str, dst_group_name: str, dst_s3_path: str, dst_ecr: str,
+        src_session: boto3.session.Session = boto3.session.Session(),
+        dst_session: boto3.session.Session = boto3.session.Session()
+):
     """
     Makes a copy of SageMaker Model Package.
 
@@ -16,31 +21,34 @@ def copy_model_package(source_arn: str, dst_account_id: str, dst_name: str, dst_
     6. Creates new SageMaker Model Package in current AWS account.
 
     :param source_arn:
-    :param dst_account_id:
-    :param dst_name:
     :param dst_group_name:
     :param dst_s3_path:
     :param dst_ecr:
+    :param src_session: boto3.session.Session, used only in source AWS account
+    :param dst_session: boto3.session.Session, used only in destination AWS account
     :return:
     """
-    sm = boto3.client('sagemaker')
-    src_model_package = sm.describe_model_package(ModelPackageName=source_arn)
+    src_sm = src_session.client('sagemaker')
+    dst_sm = dst_session.client('sagemaker')
+    src_model_package = src_sm.describe_model_package(ModelPackageName=source_arn)
 
-    dst_model_package, files_to_copy, docker_images_to_copy = rebuild_model_package(src_model_package, dst_account_id, dst_name, dst_group_name, dst_s3_path, dst_ecr)
+    dst_model_package, files_to_copy, docker_images_to_copy = rebuild_model_package(
+        src_model_package, dst_group_name, dst_s3_path, dst_ecr
+    )
     pprint(dst_model_package)
     pprint(files_to_copy)
     pprint(docker_images_to_copy)
 
-    copy_files(files_to_copy)
+    copy_files(files_to_copy, src_session, dst_session)
     copy_docker_images(docker_images_to_copy)
 
-    response = sm.create_model_package(**dst_model_package)
+    response = dst_sm.create_model_package(**dst_model_package)
+    print("Model copy completed.")
     pprint(response)
+    return response.get("ModelPackageArn")
 
-    pass
 
-
-def rebuild_model_package(src_model_package: dict, dst_account_id: str, dst_name: str, dst_group_name: str, dst_s3_path: str, dst_ecr: str):
+def rebuild_model_package(src_model_package: dict, dst_group_name: str, dst_s3_path: str, dst_ecr: str):
     dont_copy_keys = [
         'ModelPackageName', 'ModelPackageGroupName',
         'ModelPackageVersion', 'ModelPackageArn', 'CreationTime', 'ModelPackageStatus', 'ModelPackageStatusDetails',
@@ -52,7 +60,7 @@ def rebuild_model_package(src_model_package: dict, dst_account_id: str, dst_name
             dst_model_package[k] = v
 
     # dst_model_package['Tags'] = []
-    # dst_model_package['ModelPackageName'] = dst_name
+    # dst_model_package['ModelPackageName'] = dst_name      # gives error: botocore.exceptions.ClientError: An error occurred (ValidationException) when calling the CreateModelPackage operation: 1 validation errors detected:Environment variable map cannot be specified when using non-versioned ModelPackages
     dst_model_package['ModelPackageGroupName'] = dst_group_name
 
     files_to_copy = []
@@ -61,6 +69,7 @@ def rebuild_model_package(src_model_package: dict, dst_account_id: str, dst_name
         # copy docker image
         p: tuple = prepare_docker_urls(container.get("Image"), dst_ecr)
         docker_images_to_copy.append(p)
+        container["Image"] = p[1]
 
         del container["ImageDigest"]
 
@@ -105,17 +114,35 @@ def prepare_docker_urls(src_uri: str, dst_ecr: str):
     return src_uri, f"{dst_ecr}:{dst_tag}"
 
 
-def copy_files(files_to_copy: list):
-    s3 = boto3.resource('s3')
-    for src, dst in files_to_copy:
-        src_tuple = parse_s3_url(src)
-        dst_tuple = parse_s3_url(dst)
-        copy_source = {
-            'Bucket': src_tuple[0],
-            'Key': src_tuple[1]
-        }
-        print(f"Copying from {src} to {dst}")
-        s3.meta.client.copy(copy_source, dst_tuple[0], dst_tuple[1])
+def copy_files(
+        files_to_copy: list,
+        src_session: boto3.session.Session,
+        dst_session: boto3.session.Session
+    ):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        src_s3 = src_session.client('s3')
+        dst_s3 = dst_session.client('s3')
+        for src, dst in files_to_copy:
+            src_tuple = parse_s3_url(src)
+            dst_tuple = parse_s3_url(dst)
+            filename = os.path.basename(src)
+            temp_file = os.path.join(temp_dir, filename)
+
+            print(f"Downloading {src} to temp file {temp_file}")
+            src_s3.download_file(src_tuple[0], src_tuple[1], temp_file)
+
+            print(f"Uploading {dst}")
+            dst_s3.upload_file(temp_file, dst_tuple[0], dst_tuple[1])
+
+            print(f"Deleting {temp_file}")
+            os.remove(temp_file)
+
+            # copy_source = {
+            #     'Bucket': src_tuple[0],
+            #     'Key': src_tuple[1]
+            # }
+            # print(f"Copying from {src} to {dst}")
+            # s3.meta.client.copy(copy_source, dst_tuple[0], dst_tuple[1])
 
 
 def copy_docker_images(images_to_copy: list):
@@ -140,9 +167,9 @@ def copy_docker_images(images_to_copy: list):
                 print(line)
 
 
-def list_docker_images_in_model_package(source_arn: str):
-    sm = boto3.client('sagemaker')
-    src_model_package = sm.describe_model_package(ModelPackageName=source_arn)
+def list_docker_images_in_model_package(model_package_arn: str, session: boto3.session.Session = boto3.session.Session()):
+    sm = session.client('sagemaker')
+    src_model_package = sm.describe_model_package(ModelPackageName=model_package_arn)
 
     return [container.get("Image") for container in src_model_package.get("InferenceSpecification").get("Containers")]
 
