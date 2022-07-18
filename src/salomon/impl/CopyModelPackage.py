@@ -157,7 +157,11 @@ def copy_docker_images(images_to_copy: list, docker_client: docker.client.Docker
             ts = time.time()
             if ts - prev_ts > 10:
                 prev_ts = ts
-                logger.debug(line)
+                logger.info(line)
+            else:
+                logging.debug(line)
+            if 'error' in line.keys():
+                raise Exception(f"Can't push to docker registry: {line}")
 
 
 def list_docker_images_in_model_package(model_package_arn: str, session: boto3.session.Session = boto3.session.Session()):

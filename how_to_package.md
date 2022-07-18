@@ -16,8 +16,8 @@ https://packaging.python.org/en/latest/tutorials/packaging-projects/
 
 ## Run only once:
 ```shell
-python -m pip install --upgrade build
-python -m pip install --upgrade twine
+python3 -m pip install --upgrade build
+python3 -m pip install --upgrade twine
 ```
 
 TODO: generate token in PyPi and store it in laptop... 
@@ -26,12 +26,12 @@ TODO: generate token in PyPi and store it in laptop...
 ## run every time to build package
 ```sh
 
-python -m build
+python3 -m build
 
 # for test
-python -m twine upload --repository testpypi dist/*
+python3 -m twine upload --repository testpypi dist/*
 
 # TODO: for prod
-python -m twine upload dist/*
+python3 -m twine upload dist/*
 
 ```
