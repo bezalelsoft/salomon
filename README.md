@@ -6,7 +6,7 @@ Solves everlasting issues with Amazon SageMaker:
 2. Freeze SageMaker model, so that model used for SageMaker endpoints is immutable and safe from incidental modifications by data scientists
 3. Single-command operation for model copy (fills gaps present in Terraform, CloudFormation, etc.) 
 
-(currently works with SageMaker Model Package. TODO: add SageMaker Model support.)
+(currently works only with SageMaker Model Package. TODO: add SageMaker Model support.)
 
 ## Installation
 
