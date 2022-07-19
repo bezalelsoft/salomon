@@ -7,9 +7,9 @@ from .s3_helper import parse_s3_url
 
 def copy_model_package(
         source_arn: str, dst_group_name: str, dst_s3_path: str, dst_ecr: str,
-        src_session: boto3.session.Session = boto3.session.Session(),
-        dst_session: boto3.session.Session = boto3.session.Session(),
-        docker_client: docker.client.DockerClient = docker.client.from_env()
+        src_session: boto3.session.Session = None,
+        dst_session: boto3.session.Session = None,
+        docker_client: docker.client.DockerClient = None
 ):
     """
     Makes a copy of SageMaker Model Package.
@@ -38,6 +38,14 @@ def copy_model_package(
     :return: ARN of created model
     """
     logger = logging.getLogger(__name__)
+
+    if src_session is None:
+        src_session = boto3.session.Session(),
+    if dst_session is None:
+        dst_session = boto3.session.Session(),
+    if docker_client is None:
+        docker_client = docker.client.from_env()
+
     src_sm = src_session.client('sagemaker')
     dst_sm = dst_session.client('sagemaker')
     src_model_package = src_sm.describe_model_package(ModelPackageName=source_arn)
@@ -112,6 +120,7 @@ def join_uri(path: str, *elements: str) -> str:
         else:
             path = f"{path}/{filename}"
     return path
+
 
 def prepare_docker_urls(src_uri: str, dst_ecr: str, tag_suffix: str):
     src_repository, src_tag = src_uri.split(":")
