@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import List, Dict
 
 import boto3, os, time, tempfile, logging
-import docker
+import docker, docker.utils
 from .s3_helper import parse_s3_url
 
 
@@ -68,9 +68,9 @@ def copy_model_package(
     logger = logging.getLogger(__name__)
 
     if src_session is None:
-        src_session = boto3.session.Session(),
+        src_session = boto3.session.Session()
     if dst_session is None:
-        dst_session = boto3.session.Session(),
+        dst_session = boto3.session.Session()
     if docker_client is None:
         docker_client = docker.client.from_env()
 
@@ -163,9 +163,10 @@ def rebuild_model_package(src_model_package: dict, dst_group_name: str, dst_s3_p
 
     files_to_copy = []
     docker_images_to_copy = []
+    i=0
     for container in dst_model_package.get("InferenceSpecification").get("Containers"):
         # copy docker image
-        p: DockerImageToCopy = prepare_docker_urls(container.get("Image"), dst_ecr, ts_str, src_docker_auths, dst_docker_auth)
+        p: DockerImageToCopy = prepare_docker_urls(container.get("Image"), dst_ecr, f"{i}-{ts_str}", src_docker_auths, dst_docker_auth)
         docker_images_to_copy.append(p)
         container["Image"] = p.dst_image
 
@@ -203,15 +204,16 @@ def join_uri(path: str, *elements: str) -> str:
 
 def prepare_docker_urls(src_uri: str, dst_ecr: str, tag_suffix: str,
                         src_docker_auths: Dict[str, dict], dst_docker_auth: dict) -> DockerImageToCopy:
-    src_repository, src_tag = src_uri.split(":")
+    src_repository, src_tag = docker.utils.parse_repository_tag(src_uri)
+    src_auth = None
     if "/" in src_repository:
         registry, src_image = src_repository.split("/", maxsplit=1)
         src_auth = src_docker_auths.get(registry)
-    else:
-        src_image = src_repository
-        registry = None
 
-    dst_tag = f"{src_image}-{src_tag}-{tag_suffix}"
+    tag_infix = src_tag[0:12]
+    tag_infix = tag_infix.replace(':', "-")   # for `@sha256:something...` instead of `:tag-name`
+
+    dst_tag = f"img-{tag_infix}-{tag_suffix}"
 
     return DockerImageToCopy(src_uri, src_auth, f"{dst_ecr}:{dst_tag}", dst_docker_auth)
 
@@ -237,8 +239,8 @@ def upload_files(files_to_copy: List[FileToCopy], dst_session: boto3.session.Ses
 def pull_docker_images(images_to_copy: List[DockerImageToCopy], docker_client: docker.client.DockerClient):
     logger = logging.getLogger(__name__)
     for img in images_to_copy:
-        src_repository, src_tag = img.src_image.split(":")
-        dst_repository, dst_tag = img.dst_image.split(":")
+        src_repository, src_tag = docker.utils.parse_repository_tag(img.src_image)
+        dst_repository, dst_tag = docker.utils.parse_repository_tag(img.dst_image)
 
         user_info = f"as user {img.src_auth_config.get('username')}" if img.src_auth_config is not None else "with default credentials"
         logger.debug(f"Pulling image {src_repository}:{src_tag} {user_info}")
@@ -251,7 +253,7 @@ def pull_docker_images(images_to_copy: List[DockerImageToCopy], docker_client: d
 def push_docker_images(images_to_copy: List[DockerImageToCopy], docker_client: docker.client.DockerClient):
     logger = logging.getLogger(__name__)
     for img in images_to_copy:
-        dst_repository, dst_tag = img.dst_image.split(":")
+        dst_repository, dst_tag = docker.utils.parse_repository_tag(img.dst_image)
         user_info = f"as user {img.dst_auth_config.get('username')}" if img.dst_auth_config is not None else "with default credentials"
         logger.debug(f"Pushing image {dst_repository}:{dst_tag} {user_info}")
 
